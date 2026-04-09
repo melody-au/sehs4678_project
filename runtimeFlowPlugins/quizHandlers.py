@@ -1,4 +1,10 @@
-﻿from pathlib import Path
+﻿"""Quiz flow plugin.
+
+This module handles quiz set selection, answer validation, score tracking,
+progress persistence to user YAML files, and controlled handoff back to menu.
+"""
+
+from pathlib import Path
 import random
 from difflib import SequenceMatcher
 import yaml
@@ -14,6 +20,7 @@ QUIZ_MENU_HOLD_STATE = "hold_before_menu"
 
 
 def _outcome(response: str, next_handler: str, next_state: str, meta: dict) -> dict:
+    """Create the standardized flow outcome object expected by runtime."""
     return {
         "response": response,
         "next_handler": next_handler,
@@ -23,6 +30,7 @@ def _outcome(response: str, next_handler: str, next_state: str, meta: dict) -> d
 
 
 def _reset_quiz_runtime(meta: dict) -> dict:
+    """Clear quiz runtime fields while keeping shared conversation metadata."""
     next_meta = dict(meta)
     next_meta["quiz_active"] = None
     next_meta["quiz_index"] = 0
@@ -31,6 +39,7 @@ def _reset_quiz_runtime(meta: dict) -> dict:
 
 
 def _load_yaml(path: Path) -> dict:
+    """Load YAML safely and return an empty dict when file is missing."""
     if not path.exists():
         return {}
     with open(path, "r", encoding="utf-8") as f:
@@ -38,23 +47,28 @@ def _load_yaml(path: Path) -> dict:
 
 
 def _save_yaml(path: Path, data: dict) -> None:
+    """Write dictionary data to YAML with stable key ordering."""
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, sort_keys=True, allow_unicode=False)
 
 
 def _quiz_files() -> list[Path]:
+    """List available quiz-set YAML files."""
     return sorted(QUIZ_DIR.glob("*.yaml"))
 
 
 def _all_set_metas() -> list[dict]:
+    """Load metadata for all quiz sets."""
     return [_quiz_meta(p) for p in _quiz_files()]
 
 
 def _quiz_key(path: Path) -> str:
+    """Build a stable quiz key from the quiz filename stem."""
     return path.stem
 
 
 def _quiz_meta(path: Path) -> dict:
+    """Read one quiz set and normalize it into runtime metadata fields."""
     payload = _load_yaml(path)
     return {
         "key": _quiz_key(path),
@@ -66,14 +80,17 @@ def _quiz_meta(path: Path) -> dict:
 
 
 def _user_file(username: str) -> Path:
+    """Return the YAML path for one username."""
     return USERINFO_DIR / f"{username}.yaml"
 
 
 def _get_user_data(username: str) -> dict:
+    """Load one user's YAML profile."""
     return _load_yaml(_user_file(username))
 
 
 def _get_progress(username: str) -> dict:
+    """Extract the user's quiz progress map with safe fallback."""
     progress = _get_user_data(username).get("quiz_progress", {})
     if not isinstance(progress, dict):
         return {}
@@ -81,6 +98,7 @@ def _get_progress(username: str) -> dict:
 
 
 def _is_completed(progress: dict, quiz_key: str) -> bool:
+    """Check whether a quiz set is marked completed in stored progress."""
     if not isinstance(progress, dict):
         return False
     entry = progress.get(quiz_key, {})
@@ -88,6 +106,7 @@ def _is_completed(progress: dict, quiz_key: str) -> bool:
 
 
 def _random_not_completed_sets(username: str, count: int = 3) -> list[dict]:
+    """Return up to `count` random quiz sets not yet completed by the user."""
     progress = _get_progress(username)
     metas = _all_set_metas()
     pending = [m for m in metas if not _is_completed(progress, m["key"])]
@@ -97,6 +116,7 @@ def _random_not_completed_sets(username: str, count: int = 3) -> list[dict]:
 
 
 def _format_set_choices(choices: list[dict]) -> str:
+    """Format a numbered list of quiz choices for user display."""
     if not choices:
         return "You have completed all available sets. Type 'all sets' to review your records or 'exit' to return to the menu."
     lines = ["Pick a quiz set by number (or type 'all sets', 'encourage me', or 'exit'):"]
@@ -108,6 +128,7 @@ def _format_set_choices(choices: list[dict]) -> str:
 
 
 def _format_all_sets_status(username: str) -> str:
+    """Show completion status and score summary for all quiz sets."""
     progress = _get_progress(username)
     lines = ["All available quiz sets:"]
     for meta in _all_set_metas():
@@ -122,11 +143,13 @@ def _format_all_sets_status(username: str) -> str:
 
 
 def _is_exit_text(input_text: str) -> bool:
+    """Detect explicit menu-exit commands inside quiz flow."""
     text = (input_text or "").strip().lower()
     return text in {"exit", "quit", "back", "menu", "stop"}
 
 
 def _wants_encouragement(input_text: str, predicted_intent: str) -> bool:
+    """Detect encouragement intent using classifier tag and phrase heuristics."""
     text = (input_text or "").strip().lower().replace("'", "")
     if predicted_intent == "encouragement":
         return True
@@ -165,16 +188,19 @@ def _wants_encouragement(input_text: str, predicted_intent: str) -> bool:
 
 
 def _wants_all_sets(input_text: str) -> bool:
+    """Detect requests to show the full list of quiz sets."""
     text = (input_text or "").strip().lower()
     return text in {"all", "all sets", "sets", "list", "list sets", "what sets are there", "show sets", "available sets"}
 
 
 def _normalize_set_token(text: str) -> str:
+    """Normalize set labels for robust text matching (alnum only)."""
     lowered = (text or "").strip().lower()
     return "".join(ch for ch in lowered if ch.isalnum())
 
 
 def _trailing_digits(token: str) -> str:
+    """Extract trailing digits so aliases like 'quiz 1' match 'set1'."""
     digits = []
     for ch in reversed(token):
         if ch.isdigit():
@@ -185,12 +211,14 @@ def _trailing_digits(token: str) -> str:
 
 
 def _similarity(a: str, b: str) -> float:
+    """Return sequence similarity ratio for fuzzy set-name matching."""
     if not a or not b:
         return 0.0
     return SequenceMatcher(None, a, b).ratio()
 
 
 def _select_choice(input_text: str, choices: list[dict]) -> dict | None:
+    """Select a quiz set from user text via exact, alias, partial, or fuzzy match."""
     text = (input_text or "").strip()
     if not text:
         return None
@@ -243,6 +271,7 @@ def _select_choice(input_text: str, choices: list[dict]) -> dict | None:
 
 
 def _format_question(question: dict, number: int, total: int) -> str:
+    """Format one question prompt with numbering and answer instructions."""
     q_text = question.get("question", "")
     q_type = question.get("type", "fill-in-the-blank")
     lines = [f"Question {number}/{total}:", str(q_text)]
@@ -259,6 +288,7 @@ def _format_question(question: dict, number: int, total: int) -> str:
 
 
 def _is_correct_fill_blank(question: dict, input_text: str) -> bool:
+    """Evaluate fill-in-the-blank answers with configurable capitalization rules."""
     candidates = question.get("answer", [])
     if not isinstance(candidates, list):
         candidates = [candidates]
@@ -276,6 +306,7 @@ def _is_correct_fill_blank(question: dict, input_text: str) -> bool:
 
 
 def _is_correct_mc(question: dict, input_text: str) -> bool:
+    """Evaluate multiple-choice answers by option number or option text."""
     raw_answer = question.get("answer")
     options = question.get("options", [])
     text = (input_text or "").strip()
@@ -299,12 +330,14 @@ def _is_correct_mc(question: dict, input_text: str) -> bool:
 
 
 def _is_correct_answer(question: dict, input_text: str) -> bool:
+    """Dispatch answer checking based on question type."""
     if question.get("type") == "multiple-choice":
         return _is_correct_mc(question, input_text)
     return _is_correct_fill_blank(question, input_text)
 
 
 def _format_correct_answer(question: dict) -> str:
+    """Format the canonical correct answer for user feedback."""
     if question.get("type") == "multiple-choice":
         options = question.get("options", [])
         answer = question.get("answer")
@@ -324,6 +357,7 @@ def _format_correct_answer(question: dict) -> str:
 
 
 def _format_wrong_feedback(question: dict) -> str:
+    """Build wrong-answer feedback including optional reasoning text."""
     base = "Not quite. " + _format_correct_answer(question)
     reason = question.get("reason")
     if isinstance(reason, str) and reason.strip():
@@ -332,6 +366,7 @@ def _format_wrong_feedback(question: dict) -> str:
 
 
 def _save_quiz_result(username: str, quiz_key: str, quiz_name: str, score: int, total: int) -> None:
+    """Persist quiz completion and score back into the user YAML profile."""
     path = _user_file(username)
     user_data = _load_yaml(path)
     progress = user_data.get("quiz_progress")
@@ -348,6 +383,7 @@ def _save_quiz_result(username: str, quiz_key: str, quiz_name: str, score: int, 
 
 
 def _start_menu(meta: dict) -> dict:
+    """Initialize quiz menu state and show suggested pending quiz sets."""
     username = str(meta.get("username", "")).strip()
     if not username:
         return _outcome(
@@ -367,6 +403,7 @@ def _start_menu(meta: dict) -> dict:
 
 @runtimeFlowPlugins.register("QuizHandler")
 def quiz_handler(state, meta, inputText, predictedIntent):
+    """Run one step of quiz-state logic and return the next flow outcome."""
     next_meta = dict(meta)
 
     if state == "passoff":

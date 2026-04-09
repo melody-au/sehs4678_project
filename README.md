@@ -1,175 +1,234 @@
 # Support Chatbot Server
 
-## What this project is
-This project is a local, plugin-driven support chatbot for SEHS4678 learning activities. It combines:
-- Intent classification (TensorFlow/Keras model over bag-of-words features)
-- Runtime flow handlers (login, welcome menu, quiz, chat, encouragement)
-- YAML-based content and user records
+This folder contains a local, plugin-driven support chatbot for SEHS4678 learning activities. The current setup uses a small TensorFlow/Keras intent model, YAML-driven flows, and local retrieval content for chat support.
 
-## Why it is designed this way
-The architecture uses simple, explainable building blocks so it is easy to study and maintain:
-- Bag-of-words + lemmatization for intent detection: easy to understand, fast to train for small datasets.
-- Flow plugins registered by name: each conversational feature is isolated in one handler, so extending behavior is safer.
-- YAML content files: non-code updates for intents, quizzes, encouragements, and user progress.
+## Current setup
 
-This design trades deep language understanding for simplicity and control, which is usually a good fit for coursework projects and small domain bots.
+The project is built around a few simple parts:
 
-## Main capabilities
-- User login with salted SHA-256 password check.
-- Main menu routing to:
-  - encouragement responses
-  - quiz flow with scoring and progress save
-  - chat flow with lightweight local retrieval from runtime info files
-- Exit and handoff states between flows without restarting the program.
+- Intent classification with bag-of-words features and lemmatization.
+- Runtime flow plugins for login, welcome/menu routing, quiz handling, chat, and encouragement.
+- YAML content for intents, quizzes, encouragements, and user data.
+- Local retrieval knowledge under `runtimeInfo/ragKnowledge/`.
 
-## Project structure
-- chatbotChatter.py: Runtime entry script. Runs the chat loop, predicts intents, and dispatches handlers.
-- chatbotIntentTrainer.py: Training script. Builds intent model and saves runtime artifacts.
-- runtimeFlowPlugins/: Conversation flow plugins and registry.
-  - __init__.py: Plugin registry and autoload.
-  - loginHandlers.py: Username/password flow and validation.
-  - welcomeHandlers.py: Main menu and intent-based routing.
-  - quizHandlers.py: Quiz set selection, question handling, scoring, persistence.
-  - chatHandlers.py: Local retrieval chat over runtime knowledge files.
-  - encouragementGenerator.py: Encouragement message selection from YAML.
-- runtimeSubmodules/: Shared runtime helpers.
-  - chatbotNLP.py: Tokenization, bag-of-words, intent prediction.
-  - chatbotVisual.py: Typing effect and timestamps.
-- traintimeSubmodules/: Training-time helpers.
-  - intentLoader.py: Intent YAML loader and validation.
-- runtimeInfo/: Runtime content.
-  - Intents/: Intent definitions for classifier training and runtime responses.
-  - quiz/: Quiz set definitions.
-  - encouragement/: Encouragement message pools.
-  - userInfo/: User profile records, password hash/salt, quiz progress.
-- runtimeModels/: Generated runtime artifacts (model and vocabulary/class pickles).
+This design keeps the system easy to inspect and update for coursework use. It favors control and clarity over deep language understanding.
 
-## Data format reference
-### 1) Intent file (runtimeInfo/Intents/*.yaml)
+## Technical specification
+
+### Use of LLM
+
+An LLM is used only during content preparation for the retrieval knowledge base. The `runtimeInfo/ragKnowledge/` material was prepared from lecture notes with Google Gemini, then stored as local markdown or text files for the chatbot to retrieve at runtime.
+
+### Runtime behavior
+
+The chatbot itself does not call an external LLM when responding to users. Instead, it uses:
+
+- a trained intent classifier for menu and flow routing,
+- rule-based plugin handlers for conversation logic,
+- local retrieval over `runtimeInfo/ragKnowledge/` for topic explanations.
+
+### Technical implications
+
+- No API key is required for normal chatbot execution.
+- Responses are deterministic enough for coursework review and debugging.
+- Knowledge updates are handled by editing local files rather than retraining or calling a hosted model.
+- The quality of retrieval depends on the clarity and structure of the source notes.
+
+## What it does
+
+- Verifies users with salted SHA-256 password checks.
+- Routes users through the main menu after login.
+- Supports encouragement replies, quiz sessions, and local chat retrieval.
+- Saves quiz progress in the user YAML files.
+- Uses handoff states so flows can move between handlers without restarting the program.
+
+## Folder overview
+
+- `chatbotChatter.py`: Runtime entry point that runs the conversation loop.
+- `chatbotIntentTrainer.py`: Training script that builds the intent model and runtime artifacts.
+- `runtimeFlowPlugins/`: Runtime handler plugins and registry.
+  - `loginHandlers.py`: Login flow and credential validation.
+  - `welcomeHandlers.py`: Main menu and routing.
+  - `quizHandlers.py`: Quiz selection, scoring, and progress saving.
+  - `chatHandlers.py`: Local retrieval chat over runtime knowledge files.
+  - `encouragementGenerator.py`: Encouragement message selection.
+- `runtimeSubmodules/`: Shared runtime helpers.
+  - `chatbotNLP.py`: Tokenization, bag-of-words, and intent prediction.
+  - `chatbotVisual.py`: Typing and display helpers.
+- `traintimeSubmodules/`: Training-time helpers.
+  - `intentLoader.py`: Intent YAML loading and validation.
+- `runtimeInfo/`: Runtime content.
+  - `Intents/`: Intent definitions for training and runtime responses.
+  - `quiz/`: Quiz set definitions.
+  - `encouragement/`: Encouragement message pools.
+  - `userInfo/`: User profile records, password hash/salt, and quiz progress.
+  - `ragKnowledge/`: Retrieval knowledge files used by chat. This content was prepared from lecture notes with Google Gemini.
+    - `ragKnowledge/`: Retrieval knowledge files used by chat. This content was prepared from lecture notes with Google Gemini.
+- `runtimeModels/`: Generated runtime artifacts.
+
+## Runtime artifacts
+
+Training currently writes these files into `runtimeModels/`:
+
+- `intent_model.keras`
+- `words.pkl`
+- `classes.pkl`
+
+The runtime loads these artifacts when the chatbot starts, so they need to exist before running `chatbotChatter.py`.
+
+## Content formats
+
+### Intent files (`runtimeInfo/Intents/*.yaml`)
+
 Required keys:
-- name: intent name
-- patterns: example user utterances
-- responses: canned replies
+
+- `name`: intent name
+- `patterns`: example user utterances
+- `responses`: canned replies
 
 Example:
+
+```yaml
 name: quiz
 patterns:
   - "Start quiz"
 responses:
   - "Sure, I can help you start a quiz."
+```
 
-### 2) Quiz set file (runtimeInfo/quiz/*.yaml)
+### Quiz files (`runtimeInfo/quiz/*.yaml`)
+
 Common keys:
-- name
-- description
-- questions: list of question objects
 
-Question fields:
-- question: prompt text
-- type: fill-in-the-blank or multiple-choice
-- answer: accepted answer(s) or option number
-- options: required for multiple-choice
-- capitalization: regard or disregard (for fill-in-the-blank)
-- reason: explanation shown when answer is wrong
+- `name`
+- `description`
+- `questions`: list of question objects
 
-### 3) User file (runtimeInfo/userInfo/*.yaml)
+Question fields commonly include:
+
+- `question`: prompt text
+- `type`: fill-in-the-blank or multiple-choice
+- `answer`: accepted answer(s) or option number
+- `options`: required for multiple-choice questions
+- `capitalization`: regard or disregard for fill-in-the-blank answers
+- `reason`: explanation shown when the answer is wrong
+
+### User files (`runtimeInfo/userInfo/*.yaml`)
+
 Common keys:
-- username
-- salt
-- hashed_password
-- quiz_progress: completion and score records by set
 
-## Setup and run
-## Prerequisites
+- `username`
+- `salt`
+- `hashed_password`
+- `quiz_progress`
+
+## Setup
+
+### Prerequisites
+
 - Python 3.10+ recommended
-- pip package manager
+- `pip`
 
-Install core dependencies:
+Install the core dependencies from this folder:
+
+```bash
 pip install tensorflow keras nltk numpy pyyaml matplotlib
+```
 
 Notes:
-- The runtime and training scripts call nltk.download(...) automatically.
-- If your environment is strict/offline, preinstall NLTK data manually.
 
-## Train intent model
-Run from this folder:
+- The runtime and training scripts call `nltk.download(...)` automatically.
+- If the machine is offline or restricted, install the required NLTK data ahead of time.
+
+## Train the intent model
+
+Run this from the `Support Chatbot Server` folder:
+
+```bash
 python chatbotIntentTrainer.py
+```
 
-This generates:
-- runtimeModels/intent_model.keras
-- runtimeModels/words.pkl
-- runtimeModels/classes.pkl
+This refreshes the files in `runtimeModels/`.
 
-## Start chatbot runtime
+## Start the chatbot
+
 Run:
+
+```bash
 python chatbotChatter.py
+```
 
 Expected flow:
-1. Bot asks for username.
-2. Bot asks for password.
-3. On success, bot hands off to WelcomeHandler main menu.
-4. User can choose encouragement, quiz, or chat.
 
-## How flow handoff works
+1. The bot asks for username.
+2. The bot asks for password.
+3. On success, the bot hands off to the welcome/menu handler.
+4. The user can choose encouragement, quiz, or chat.
+
+## Flow handoff
+
 Each handler returns a dictionary with:
-- response
-- next_handler
-- next_state
-- meta_update
 
-The runtime loop updates current handler/state/meta using this outcome. A passoff state triggers internal auto-dispatch so flows can transition without waiting for extra user input.
+- `response`
+- `next_handler`
+- `next_state`
+- `meta_update`
 
-## Extension guide
+The runtime loop applies those values to the current conversation state. If a handoff state is returned, the next handler is dispatched automatically so the user does not need to restart the program.
+
+## Extending the project
+
 ### Add a new flow plugin
-1. Create a new file under runtimeFlowPlugins/.
-2. Define a function and register it with @runtimeFlowPlugins.register("YourHandlerName").
-3. Keep function signature consistent:
-   (state, meta, inputText, predictedIntent)
-4. Return the standard outcome dictionary.
-5. Route to your new handler from welcomeHandlers.py (or another handler).
 
-Because plugins auto-load from the package, new modules are discovered at startup.
+1. Create a new file under `runtimeFlowPlugins/`.
+2. Register a function with `@runtimeFlowPlugins.register("YourHandlerName")`.
+3. Keep the function signature consistent: `(state, meta, inputText, predictedIntent)`.
+4. Return the standard outcome dictionary.
+5. Route to the new handler from `welcomeHandlers.py` or another handler.
 
 ### Add new intents
-1. Add YAML under runtimeInfo/Intents/ with required keys.
-2. Retrain using chatbotIntentTrainer.py.
-3. Verify runtimeModels files are updated.
+
+1. Add a YAML file under `runtimeInfo/Intents/`.
+2. Retrain with `chatbotIntentTrainer.py`.
+3. Confirm the `runtimeModels/` files are updated.
 
 ### Add quiz content
-1. Add a new YAML set in runtimeInfo/quiz/.
-2. Ensure each question has the required fields.
-3. QuizHandler will include new sets automatically.
 
-## Important considerations and edge cases
-- Runtime artifact dependency: chatbotNLP.py loads model and pickles on import. Runtime will fail if files are missing.
-- Login security logging: loginHandlers.py currently prints salted input during password checking. Remove this print in production.
-- Input data validation: malformed intent YAML raises ValueError by design to avoid silent misbehavior.
-- Quiz matching: set selection supports exact, numeric, alias-like, and fuzzy matching, but ambiguous user text can still pick the wrong set.
-- Local retrieval chat: chat mode retrieves snippets from local runtime info files and does not call external APIs.
+1. Add a new YAML file under `runtimeInfo/quiz/`.
+2. Make sure each question includes the required fields.
+3. The quiz handler will pick up the new set automatically.
 
-## Typical development workflow
-1. Edit intents, quiz sets, or encouragement data in runtimeInfo/.
-2. If intents changed, retrain model.
-3. Run chatbot runtime and test full flow:
-   login -> welcome -> feature flow -> return to menu.
-4. Verify updated user progress in runtimeInfo/userInfo/*.yaml after quizzes.
+### Add retrieval knowledge
 
-## Troubleshooting quick list
-- Model file not found:
-  Train first with chatbotIntentTrainer.py.
-- NLTK resource error:
-  Run once with internet, or manually install punkt/wordnet resources.
-- Login always fails:
-  Confirm username file exists and hash is generated with password + salt (same order as runtime checker).
-- New plugin not called:
-  Confirm file is under runtimeFlowPlugins and function is registered with the exact handler name used in handoff.
+1. Add topic-based `.md`, `.txt`, or `.yaml` files under `runtimeInfo/ragKnowledge/`.
+2. Keep the notes clear and keyword-friendly.
+3. Restart the chatbot runtime so the retrieval index is rebuilt.
 
-## Suggested cleanup for production
-- Add a pinned requirements.txt in this folder.
+## Notes and limitations
+
+- `chatbotNLP.py` loads the model and pickles on import, so missing runtime artifacts will stop the chatbot from starting.
+- The login code currently prints salted input during password checking; that should be removed before production use.
+- Malformed intent YAML raises `ValueError` by design.
+- Quiz matching supports exact, numeric, alias-like, and fuzzy matching, but ambiguous text can still select the wrong set.
+- The chat flow uses local retrieval from the files in `runtimeInfo/ragKnowledge/` and does not call external APIs.
+
+## Typical workflow
+
+1. Update intents, quiz sets, encouragements, or retrieval notes in `runtimeInfo/`.
+2. Retrain the intent model if the intents changed.
+3. Run `chatbotChatter.py` and test the full flow: login -> welcome -> feature flow -> return to menu.
+4. Check the user YAML files after quizzes to confirm progress was saved.
+
+## Troubleshooting
+
+- Model file missing: run `chatbotIntentTrainer.py` first.
+- NLTK resource error: run once with internet access or install `punkt` and `wordnet` manually.
+- Login always fails: confirm the user file exists and the password hash is generated with the correct password and salt order.
+- New plugin not called: confirm the file is under `runtimeFlowPlugins/` and the handler name matches the handoff target.
+
+## Suggested follow-up
+
+- Pin the dependency versions in `requirements.txt`.
 - Remove sensitive debug prints from login.
-- Add unit tests for plugin transitions and quiz answer evaluation.
+- Add tests for plugin transitions and quiz evaluation.
 - Add schema checks for quiz and user YAML files.
-
-
-add:
-ragknowledge: is made by google gemini on lecture notes

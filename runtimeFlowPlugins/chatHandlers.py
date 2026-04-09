@@ -1,3 +1,11 @@
+"""Chat flow plugin with local retrieval and optional local LLM synthesis.
+
+Design summary:
+- Retrieves relevant snippets from local files in `runtimeInfo/ragKnowledge`.
+- Optionally synthesizes a concise answer using a local Hugging Face model.
+- Keeps conversation state in plugin-style outcomes for runtime handoff.
+"""
+
 import math
 import re
 from pathlib import Path
@@ -41,6 +49,7 @@ _PREFLIGHT_STATUS = {
 
 
 def _load_chat_settings() -> dict:
+    """Load chat settings YAML and merge it with safe defaults."""
     if not CHAT_SETTINGS_PATH.exists():
         return dict(_DEFAULT_CHAT_SETTINGS)
     try:
@@ -73,6 +82,7 @@ if not _EXIT_INTENT_NAMES:
 
 
 def _outcome(response: str, next_handler: str, next_state: str, meta: dict) -> dict:
+    """Create the standard flow outcome object used by the runtime loop."""
     return {
         "response": response,
         "next_handler": next_handler,
@@ -82,11 +92,13 @@ def _outcome(response: str, next_handler: str, next_state: str, meta: dict) -> d
 
 
 def _is_exit_text(input_text: str) -> bool:
+    """Detect explicit user commands that should leave chat mode."""
     text = (input_text or "").strip().lower()
     return text in {"exit", "quit", "back", "menu", "stop", "bye"}
 
 
 def _detect_exit_intent(input_text: str) -> tuple[bool, float, str]:
+    """Use intent model confidence to infer exit intent from free-form text."""
     try:
         predictions = predict_class(input_text)
     except (RuntimeError, ValueError, TypeError, AttributeError):
@@ -111,10 +123,12 @@ def _detect_exit_intent(input_text: str) -> tuple[bool, float, str]:
 
 
 def _tokenize(text: str) -> list[str]:
+    """Tokenize text into lowercase word tokens for simple retrieval scoring."""
     return [t.lower() for t in _WORD_RE.findall(text or "")]
 
 
 def _iter_knowledge_files() -> list[Path]:
+    """List knowledge files that are eligible for retrieval indexing."""
     files: list[Path] = []
     if not RAG_KNOWLEDGE_ROOT.exists():
         return files
@@ -128,6 +142,7 @@ def _iter_knowledge_files() -> list[Path]:
 
 
 def _chunk_text(text: str, max_lines: int = 10) -> list[str]:
+    """Split text into compact line-based chunks for retrieval."""
     lines = [ln.strip() for ln in (text or "").splitlines()]
     lines = [ln for ln in lines if ln]
     if not lines:
@@ -146,6 +161,7 @@ def _chunk_text(text: str, max_lines: int = 10) -> list[str]:
 
 
 def _build_index() -> tuple[list[dict], dict[str, float]]:
+    """Build a lightweight TF-IDF-style index over local knowledge chunks."""
     docs: list[dict] = []
     df: dict[str, int] = {}
 
@@ -176,6 +192,7 @@ _RAG_DOCS, _RAG_IDF = _build_index()
 
 
 def _load_local_llm() -> tuple[Any | None, Any | None, str | None]:
+    """Lazy-load tokenizer/model for local synthesis and cache the result."""
     if _LLM_CACHE["tokenizer"] is not None and _LLM_CACHE["model"] is not None:
         return _LLM_CACHE["tokenizer"], _LLM_CACHE["model"], None
     if _LLM_CACHE["load_attempted"]:
@@ -196,6 +213,7 @@ def _load_local_llm() -> tuple[Any | None, Any | None, str | None]:
 
 
 def _run_startup_preflight() -> None:
+    """Capture startup diagnostics for retrieval docs and LLM readiness."""
     # RAG files are already read during module import when _build_index() runs.
     _PREFLIGHT_STATUS["rag_docs"] = len(_RAG_DOCS)
     _PREFLIGHT_STATUS["rag_sources"] = len({doc["source"] for doc in _RAG_DOCS})
@@ -209,6 +227,7 @@ _run_startup_preflight()
 
 
 def _score_query(query_tokens: list[str], doc: dict, idf: dict[str, float]) -> float:
+    """Score one document chunk against query tokens using weighted overlap."""
     if not query_tokens:
         return 0.0
     tf = doc["tf"]
@@ -221,6 +240,7 @@ def _score_query(query_tokens: list[str], doc: dict, idf: dict[str, float]) -> f
 
 
 def _retrieve(query: str, top_k: int = 2) -> list[dict]:
+    """Return top-k retrieved chunks for a query from the local index."""
     q_tokens = _tokenize(query)
     if not q_tokens or not _RAG_DOCS:
         return []
@@ -236,6 +256,7 @@ def _retrieve(query: str, top_k: int = 2) -> list[dict]:
 
 
 def _build_extractive_response(hits: list[dict]) -> str:
+    """Format retrieval hits directly when synthesis is unavailable."""
     lines = ["Here is what I found:"]
     for idx, hit in enumerate(hits, start=1):
         snippet = hit["chunk"]
@@ -248,6 +269,7 @@ def _build_extractive_response(hits: list[dict]) -> str:
 
 
 def _build_synthesis_prompt(query: str, hits: list[dict]) -> str:
+    """Build a constrained prompt so synthesis only uses retrieved context."""
     context_lines = []
     for idx, hit in enumerate(hits, start=1):
         context_lines.append(f"[{idx}] Source: {hit['source']}")
@@ -267,6 +289,7 @@ def _build_synthesis_prompt(query: str, hits: list[dict]) -> str:
 
 
 def _clean_llm_answer(decoded_text: str, prompt: str) -> str:
+    """Remove prompt echo/noise from raw causal-model decoded output."""
     text = (decoded_text or "").strip()
     if not text:
         return ""
@@ -293,6 +316,7 @@ def _clean_llm_answer(decoded_text: str, prompt: str) -> str:
 
 
 def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
+    """Generate a concise grounded answer with the local causal model."""
     tokenizer, model, _err = _load_local_llm()
     if tokenizer is None or model is None:
         return None
@@ -328,6 +352,7 @@ def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
 
 
 def _build_rag_response(query: str) -> str:
+    """Return a final chat reply using retrieval plus optional synthesis."""
     hits = _retrieve(query, top_k=2)
     if not hits:
         return (
@@ -344,6 +369,7 @@ def _build_rag_response(query: str) -> str:
 
 @runtimeFlowPlugins.register("ChatHandler")
 def chat_handler(state, meta, inputText, _predictedIntent):
+    """Run one step of chat-mode state handling and return next flow outcome."""
     next_meta = dict(meta)
 
     if state == "passoff":

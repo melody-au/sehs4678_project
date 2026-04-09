@@ -1,8 +1,12 @@
-# Lemmatizer chat.py
-#
-# This program uses a pre-trained model.
-#
-# Student Name: Au Yuen Yee      Student ID: 24002405S
+"""Runtime entry script for the Support Chatbot.
+
+This script runs the terminal chat loop, predicts intents from user text,
+dispatches flow handlers from `runtimeFlowPlugins`, and applies handler
+handoff state transitions (`next_handler`, `next_state`, `meta_update`).
+
+How to run:
+    python chatbotChatter.py
+"""
 
 import nltk
 from nltk.stem import WordNetLemmatizer
@@ -29,6 +33,14 @@ import runtimeFlowPlugins
 # ---------------------------
 
 def get_response(intents_list):
+    """Pick a canned response for the top predicted intent.
+
+    Parameters:
+    - intents_list: list of intent predictions from the classifier.
+
+    Returns:
+    - str: one response line for the best-matching intent.
+    """
     if not intents_list:
         return "I'm not sure I understand. Could you rephrase?"
 
@@ -43,11 +55,13 @@ def get_response(intents_list):
 
 
 def chatbot_response(msg):
+    """Generate a simple response from classifier output only."""
     ints = predict_class(msg)
     return get_response(ints)
 
 
 def chatbot_callFlows(handler, state, meta, inputText, predictedIntent) -> dict[str, Any]:
+    """Call the current flow plugin and return the standardized outcome object."""
     # call flow plugins based on handler input to get response text and next states
     try:
         plugin = runtimeFlowPlugins.require(handler)
@@ -68,6 +82,7 @@ def chatbot_callFlows(handler, state, meta, inputText, predictedIntent) -> dict[
 # ---------------------------
 
 def print_interface():
+    """Print a minimal terminal banner before chat starts."""
     # TODO: Add ASCII art or a welcome message here if desired, do it later after working with the plugins
     print("=" * 50)
     print("AI Chatbot")

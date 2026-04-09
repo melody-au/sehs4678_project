@@ -1,3 +1,9 @@
+"""Encouragement text helper.
+
+Loads encouragement messages from YAML and returns a random message for the
+requested context (currently only the generic `any` state is implemented).
+"""
+
 from pathlib import Path
 import random
 import yaml
@@ -7,6 +13,7 @@ ENCOURAGEMENT_ANY_FILEPATH = BASEPATH / "runtimeInfo" / "encouragement" / "encou
 
 
 def get_encouragement_on_path(filepath) -> str:
+    """Load encouragement lines from a YAML file and return one random item."""
     if not filepath.exists():
         return "I can't find a encouragement; but keep going!"
 
@@ -21,6 +28,7 @@ def get_encouragement_on_path(filepath) -> str:
 
 
 def encouragement_switch(state) -> str:
+    """Map a lightweight encouragement state key to the right data source."""
     if state == "any":
         return get_encouragement_on_path(ENCOURAGEMENT_ANY_FILEPATH)
     return "I don't have any encouragements for this situation, but keep going!"

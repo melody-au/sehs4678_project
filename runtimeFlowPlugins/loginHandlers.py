@@ -1,3 +1,9 @@
+"""Login flow plugin.
+
+This handler guides the user through username/password states and verifies
+credentials using salted SHA-256 hashes from YAML files in `runtimeInfo/userInfo`.
+"""
+
 import runtimeFlowPlugins
 from pathlib import Path
 from enum import Enum, auto
@@ -14,6 +20,17 @@ class LoginResult(Enum):
 
 @runtimeFlowPlugins.register("LoginHandler")
 def login_handler(state, meta, inputText, predictedIntent):
+    """Process one login step and return the next state/handler outcome.
+
+    Parameters:
+    - state: current login state string.
+    - meta: shared conversation metadata dict.
+    - inputText: latest user input text.
+    - predictedIntent: current predicted intent (unused in login states).
+
+    Returns:
+    - dict with keys `response`, `next_handler`, `next_state`, `meta_update`.
+    """
     #defaults: 
     nextHandler = "LoginHandler"
     nextResponse = ""
@@ -44,6 +61,7 @@ def login_handler(state, meta, inputText, predictedIntent):
     return {"response": nextResponse, "next_handler": nextHandler, "next_state": nextState, "meta_update": nextMeta}
 
 def passwordChecker(username, password):
+    """Verify username/password against salted hash in the user YAML file."""
     userFile = USERFILEPATH / f"{username}.yaml"
     if not userFile.exists():
         return LoginResult.NO_USER
@@ -51,7 +69,6 @@ def passwordChecker(username, password):
         data = yaml.safe_load(f)
         # passwords are sha256 hashed with salt prepended.
         salted_input = password + data["salt"]
-        print(salted_input)
         hashed_input = hashlib.sha256(salted_input.encode()).hexdigest()
         if hashed_input == data["hashed_password"]:
             return LoginResult.SUCCESS

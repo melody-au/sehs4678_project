@@ -1,8 +1,15 @@
+"""Welcome/menu flow plugin.
+
+This handler acts as the router after login. It responds to main-menu intents
+and hands off to encouragement, quiz, or chat flows.
+"""
+
 import runtimeFlowPlugins
 from .encouragementGenerator import encouragement_switch
 
 @runtimeFlowPlugins.register("WelcomeHandler")
 def welcome_handler(state, meta, inputText, predictedIntent):
+    """Route menu-level intents and return standardized flow outcomes."""
     #defaults: 
     nextHandler = "WelcomeHandler"
     nextResponse = ""
