@@ -331,23 +331,36 @@ def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
 
     tokenizer_obj: Any = tokenizer
     model_obj: Any = model
+    tokenizer_call = getattr(tokenizer_obj, "__call__", None)
+    tokenizer_decode = getattr(tokenizer_obj, "decode", None)
+    model_generate = getattr(model_obj, "generate", None)
+
+    if not callable(tokenizer_call):
+        _LAST_LLM_RUNTIME_ERROR = "Loaded tokenizer is not callable"
+        return None
+    if not callable(tokenizer_decode):
+        _LAST_LLM_RUNTIME_ERROR = "Loaded tokenizer has no callable decode()"
+        return None
+    if not callable(model_generate):
+        _LAST_LLM_RUNTIME_ERROR = "Loaded model has no callable generate()"
+        return None
 
     prompt = _build_synthesis_prompt(query, hits)
     try:
-        model_inputs = tokenizer_obj(
+        model_inputs = tokenizer_call(
             prompt,
             return_tensors="pt",
             truncation=True,
             max_length=_LLM_MAX_INPUT_TOKENS,
         )
         model_inputs = model_inputs.to(_LLM_DEVICE)
-        output_ids = model_obj.generate(
+        output_ids = model_generate(
             **model_inputs,
             max_new_tokens=_LLM_MAX_NEW_TOKENS,
             do_sample=False,
             pad_token_id=tokenizer_obj.eos_token_id,
         )
-        decoded = tokenizer_obj.decode(output_ids[0], skip_special_tokens=True)
+        decoded = tokenizer_decode(output_ids[0], skip_special_tokens=True)
         decoded = _clean_llm_answer(decoded, prompt)
 
         if not decoded:
