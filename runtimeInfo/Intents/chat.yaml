@@ -8,7 +8,15 @@ patterns:
 - "I want to ask questions"
 - "Take me to chat"
 - "I need help understanding notes"
+- "I have a question"
+- "I need an explanation"
+- "Help me learn"
+- "I want to discuss a topic"
+- "Can you tell me more?"
+- "Teach me something"
 responses:
 - "Sure, I will switch to chat mode."
 - "Okay, let's chat."
 - "Taking you to chat now."
+
+
