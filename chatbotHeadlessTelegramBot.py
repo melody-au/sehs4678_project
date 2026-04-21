@@ -208,10 +208,21 @@ def _call_flow(
             "next_state": state,
             "meta_update": meta,
         }
+    
+def _unregister_session(chat_id: int) -> None:
+    """Remove session from active sessions, optionally cleaning up user-session mapping."""
+    global _ACTIVE_USER_SESSIONS
+    keys_to_remove = [user_id for user_id, c_id in _ACTIVE_USER_SESSIONS.items() if c_id == chat_id]
+    for user_id in keys_to_remove:
+        del _ACTIVE_USER_SESSIONS[user_id]
+        if DEBUGGING:
+            logging.info("Unregistered username '%s' from chat_id '%d'", user_id, chat_id)
 
 
-def _run_turn(session: dict[str, Any], message: str) -> str:
+def _run_turn(session: dict[str, Any], message: str, chat_id: int) -> str:
     """Run one full turn including auto-passoff chaining and state updates."""
+    global _ACTIVE_USER_SESSIONS
+
     handler = str(session.get("handler", "LoginHandler"))
     state = str(session.get("state", "start"))
     meta = dict(session.get("meta", {}))
@@ -220,10 +231,24 @@ def _run_turn(session: dict[str, Any], message: str) -> str:
     if DEBUGGING:
         logging.info("Predicted intent=%s handler=%s state=%s", predicted_intent, handler, state)
 
-    outcomes = _call_flow(handler, state, meta, message, predicted_intent)
+    outcomes = _call_flow(str(session.get("handler", "LoginHandler")), 
+        str(session.get("state", "start")), 
+        meta, 
+        message, 
+        predicted_intent)
     response_chain: list[str] = []
     if outcomes.get("response"):
         response_chain.append(str(outcomes["response"]))
+
+    new_meta = outcomes.get("meta_update") or meta
+    username = new_meta.get("username")
+    if username: 
+        active_chat_id = _ACTIVE_USER_SESSIONS.get(username)
+        if active_chat_id is not None and active_chat_id != chat_id:
+            return "This username is currently active in another session. Please choose a different username or wait until the other session is finished."
+        _ACTIVE_USER_SESSIONS[username] = chat_id
+        if DEBUGGING:
+            logging.info("Registered username '%s' to chat_id '%d'", username, chat_id)
 
     # Guard prevents accidental infinite handoff loops if a plugin keeps
     # returning `passoff` without eventually moving to a stable state.
@@ -260,7 +285,7 @@ async def _run_turn_with_typing(
 ) -> str:
     """Run one turn while periodically showing Telegram typing status."""
     # Run the flow in a worker thread so the event loop can keep sending typing actions.
-    task = asyncio.create_task(asyncio.to_thread(_run_turn, session, message))
+    task = asyncio.create_task(asyncio.to_thread(_run_turn, session, message, chat_id))
     while True:
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
         try:
@@ -282,10 +307,11 @@ async def start_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> 
     session = _new_session()
     _SESSIONS[chat_id] = session
 
+    _unregister_session(chat_id)  # Clean up any existing user-session mapping for this chat_id on new start
+
     first_response = await _run_turn_with_typing(_context, chat_id, session, "")
     _append_activity_log(chat_id, user_id, "sent", first_response)
     await _reply_text_safely(update, first_response)
-
 
 async def reset_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
     """Clear session state and start from the login flow again."""
@@ -295,6 +321,8 @@ async def reset_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> 
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id if update.effective_user is not None else None
     _append_activity_log(chat_id, user_id, "received", "/reset")
+
+    _unregister_session(chat_id)  # Clean up any existing user-session mapping for this chat_id on reset
 
     session = _new_session()
     _SESSIONS[chat_id] = session
@@ -320,6 +348,7 @@ async def text_message(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> N
     if _is_session_idle(session):
         # If a user comes back after a long pause, restart from login state to
         # avoid resuming stale flow context unexpectedly.
+        _unregister_session(chat_id)  # Clean up any existing user-session mapping for this chat_id on idle reset
         session = _new_session()
         _SESSIONS[chat_id] = session
         greeting = await _run_turn_with_typing(_context, chat_id, session, "")
