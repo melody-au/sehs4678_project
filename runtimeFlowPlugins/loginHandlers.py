@@ -75,3 +75,32 @@ def passwordChecker(username, password):
         else:
             return LoginResult.WRONG_PASSWORD
         
+@runtimeFlowPlugins.register("SettingHandler")
+def setting_handler(state, meta, inputText, predictedIntent):
+    """Placeholder for a settings handler that could allow users to change their password or other preferences."""
+    username = meta.get("username")
+    nextHandler = "SettingHandler"
+    nextMeta = meta
+    if state == "verify_old_password":
+        if inputText.strip().lower() == "exit":
+            return {"response": "Password change cancelled. Returning to main menu.", "next_handler": "WelcomeHandler", "next_state": "passoff", "meta_update": nextMeta}
+        if passwordChecker(username, inputText) == LoginResult.SUCCESS:
+            return {"response": "Verification successful. Please enter your new password:", "next_handler": nextHandler, "next_state": "enter_new_password", "meta_update": nextMeta}
+        else:
+            return {"response": "Incorrect password. Please try again or type 'exit' to cancel: ", "next_handler": nextHandler, "next_state": "verify_old_password", "meta_update": nextMeta}
+    if state == "enter_new_password":
+        new_password = inputText
+        update_password(username, new_password)
+        return {"response": "Your password has been updated successfully.", "next_handler": "WelcomeHandler", "next_state": "passoff", "meta_update": nextMeta}
+    return {"response": "Something went wrong. Returning to menu.", "next_handler": "WelcomeHandler", "next_state": "passoff", "meta_update": nextMeta}
+    
+def update_password(username, new_password):
+    userFile = USERFILEPATH / f"{username}.yaml"
+    with open(userFile, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    salt = data["salt"]
+    salted_input = new_password + salt
+    new_hashed_password = hashlib.sha256(salted_input.encode()).hexdigest()
+    data["hashed_password"] = new_hashed_password
+    with open(userFile, "w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f)
