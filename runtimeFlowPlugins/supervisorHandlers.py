@@ -108,12 +108,12 @@ def supervisor_handler(state, meta, inputText, predictedIntent):
             }
         
         elif choice == "3" or "exit" in choice:
-            return {"response": "Goodbye, Supervisor!", "next_handler": "Main", "next_state": "exit", "meta_update": meta}
+            return {"response": "You have been logged out. Goodbye, Supervisor!", "next_handler": "LoginHandler", "next_state": "start", "meta_update": {}}
         elif "menu" in choice: # return to admin panel menu
              return {"response": "", "next_handler": "SupervisorHandler", "next_state": "passoff", "meta_update": meta}
         else:
             return {
-                "response": "Invalid choice. Please select 1 or 2.",
+                "response": "Invalid choice. Please select 1 or 2 or 3.",
                 "next_handler": "SupervisorHandler",
                 "next_state": "awaiting_choice",
                 "meta_update": meta
