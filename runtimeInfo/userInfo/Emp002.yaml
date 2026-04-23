@@ -1,5 +1,10 @@
 hashed_password: 5da7532847dd415692e710e0413eb1cd62bcb7baae8f6e822a866c603bb2fec6
+quiz_progress:
+  Set1:
+    completed: true
+    name: Set 1
+    score: 1
+    total: 5
 role: student
-quiz_progress: {}
 salt: ji8z2fmbnlrsu7px
 username: Emp002

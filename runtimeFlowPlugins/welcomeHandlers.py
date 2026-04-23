@@ -58,7 +58,7 @@ def welcome_handler(state, meta, inputText, predictedIntent):
     if state == "confirming_exit":
         user_reply = inputText.strip().lower()
         if user_reply == "yes":
-            return {"response": "See you later!", "next_handler": "LoginHandler", "next_state": "exit", "meta_update": nextMeta}
+            return {"response": "See you later!", "next_handler": "LoginHandler", "next_state": "start", "meta_update": nextMeta}
         elif user_reply == "no":
             nextResponse = MAIN_MENU_WELCOME_MESSAGE
             return {"response": nextResponse, "next_handler": nextHandler, "next_state": "success", "meta_update": nextMeta}
