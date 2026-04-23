@@ -1,4 +1,4 @@
-﻿"""Quiz flow plugin.
+"""Quiz flow plugin.
 
 This module handles quiz set selection, answer validation, score tracking,
 progress persistence to user YAML files, and controlled handoff back to menu.
@@ -11,7 +11,6 @@ import yaml
 import runtimeFlowPlugins
 
 from .encouragementGenerator import encouragement_switch
-from .welcomeHandlers import get_return_to_menu_message
 
 
 BASEPATH = Path(__file__).resolve().parent.parent
@@ -24,8 +23,8 @@ def _outcome(response: str, next_handler: str, next_state: str, meta: dict) -> d
     """Create the standardized flow outcome object expected by runtime."""
     return {
         "response": response,
-        "next_handler": "WelcomeHandler",
-        "next_state": "return_to_menu",
+        "next_handler": next_handler,
+        "next_state": next_state,
         "meta_update": meta,
     }
 
@@ -119,7 +118,12 @@ def _random_not_completed_sets(username: str, count: int = 3) -> list[dict]:
 def _format_set_choices(choices: list[dict]) -> str:
     """Format a numbered list of quiz choices for user display."""
     if not choices:
-        return "You have completed all available sets. Type 'all sets' to review your records or 'exit' to return to the menu."
+        return (
+            "You have completed all available quiz sets, great work! What would you like to do next?\n\n"
+            "1. Redo a quiz\n"
+            "2. View my scores\n"
+            "3. Return to main menu"
+        )
     lines = ["Pick a quiz set by number (or type 'all sets', 'encourage me', or 'exit'):"]
     idx = 1
     for item in choices:
@@ -387,14 +391,14 @@ def _start_menu(meta: dict) -> dict:
     """Initialize quiz menu state and show suggested pending quiz sets."""
     username = str(meta.get("username", "")).strip()
     if not username:
-        return _outcome(
-            "I couldn't find your user profile. Returning to main menu.",
-            "WelcomeHandler",
-            "passoff",
-            meta,
-        )
+        return _outcome("I couldn't find your user profile.", "WelcomeHandler", "return_to_menu", meta)
 
     choices = _random_not_completed_sets(username, count=3)
+    if not choices:
+        # All quizzes completed! Show the special menu.
+        response = _format_set_choices([])
+        return _outcome(response, "QuizHandler", "awaiting_completed_choice", meta)
+
     all_choices = _all_set_metas()
     next_meta = _reset_quiz_runtime(meta)
     next_meta["quiz_choices"] = choices
@@ -410,20 +414,35 @@ def quiz_handler(state, meta, inputText, predictedIntent):
     if state == "passoff":
         return _start_menu(next_meta)
 
-    if state == QUIZ_MENU_HOLD_STATE:
-        # Wait for one user input before handing off back to main menu.
-        return _outcome(get_return_to_menu_message(), "WelcomeHandler", "passoff", next_meta)
+    if state == "awaiting_completed_choice":
+        choice = inputText.strip().lower()
+        username = str(meta.get("username", "")).strip()
+        
+        if choice == "1" or "redo" in choice:
+            # User wants to redo -> provide all sets and switch to awaiting_set_choice
+            all_choices = _all_set_metas()
+            next_meta["quiz_choices"] = all_choices
+            response = "Okay, which quiz would you like to redo?\n\n" + _format_set_choices(all_choices)
+            return _outcome(response, "QuizHandler", "awaiting_set_choice", next_meta)
+
+        elif choice == "2" or "score" in choice:
+            # User wants scores -> show scores and stay in this state
+            response = _format_all_sets_status(username) + "\n\nWhat would you like to do next?\n1. Redo a quiz\n2. View my scores\n3. Return to main menu"
+            return _outcome(response, "QuizHandler", "awaiting_completed_choice", next_meta)
+
+        elif choice == "3" or "menu" in choice or _is_exit_text(inputText):
+            # User wants main menu
+            return _outcome("Okay, returning to main menu.", "WelcomeHandler", "return_to_menu", next_meta)
+            
+        else:
+            return _outcome("Please choose 1, 2, or 3.", "QuizHandler", "awaiting_completed_choice", next_meta)
 
     if state == "awaiting_set_choice":
         username = str(next_meta.get("username", "")).strip()
 
         if _wants_all_sets(inputText):
-            all_choices = next_meta.get("quiz_all_choices", [])
-            if not all_choices:
-                all_choices = _all_set_metas()
-                next_meta["quiz_all_choices"] = all_choices
-
-            # Switch active menu choices to all sets so completed sets are selectable.
+            all_choices = _all_set_metas()
+            next_meta["quiz_all_choices"] = all_choices
             next_meta["quiz_choices"] = all_choices
             response = _format_all_sets_status(username) + "\n\n" + _format_set_choices(all_choices)
             return _outcome(response, "QuizHandler", "awaiting_set_choice", next_meta)
@@ -448,23 +467,9 @@ def quiz_handler(state, meta, inputText, predictedIntent):
             return _outcome(response, "QuizHandler", "awaiting_answer", next_meta)
 
         if _is_exit_text(inputText):
-            return _outcome(f"{get_return_to_menu_message()} (you typed 'exit')", "QuizHandler", QUIZ_MENU_HOLD_STATE, next_meta)
+            return _outcome(f"Returning to main menu. (you typed '{inputText.strip()}')", "WelcomeHandler", "return_to_menu", next_meta)
 
-        if selected is None:
-            return _outcome(
-                "Please choose one of the displayed set numbers, or type 'all sets'.",
-                "QuizHandler",
-                "awaiting_set_choice",
-                next_meta,
-            )
-
-    if _is_exit_text(inputText):
-        return _outcome(f"{get_return_to_menu_message()} (you typed 'exit')", "QuizHandler", QUIZ_MENU_HOLD_STATE, next_meta)
-
-    if _wants_encouragement(inputText, predictedIntent):
-        encouragement = encouragement_switch("any")
-        suffix = "\nYou can continue the quiz, ask for all sets, or type exit."
-        return _outcome(encouragement + suffix, "QuizHandler", state, next_meta)
+        return _outcome("Please choose one of the displayed set numbers, or type 'all sets'.", "QuizHandler", "awaiting_set_choice", next_meta)
 
     if state == "awaiting_answer":
         active = next_meta.get("quiz_active")
@@ -504,19 +509,13 @@ def quiz_handler(state, meta, inputText, predictedIntent):
             final_feedback = _format_wrong_feedback(current_question) + "\n"
 
         percentage = (final_score / total) * 100 
-        if percentage == 100:
-            tag = "mastery"
-        elif percentage >= 60:
-            tag = "competence"
-        elif percentage >= 40:
-            tag = "confidence"
-        elif percentage >= 20:
-            tag = "growth"
-        else:
-            tag = "support"
+        tag = "support"
+        if percentage == 100: tag = "mastery"
+        elif percentage >= 60: tag = "competence"
+        elif percentage >= 40: tag = "confidence"
+        elif percentage >= 20: tag = "growth"
+        
         emotional_support = encouragement_switch("tiered", tag=tag)
-
-
         summary = f"Quiz complete: {active['name']}\nYour score: {final_score}/{total}.\n{emotional_support}"
         next_meta = _reset_quiz_runtime(next_meta)
         return _outcome(final_feedback + summary, "QuizHandler", "passoff", next_meta)

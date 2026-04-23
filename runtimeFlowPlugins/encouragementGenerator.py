@@ -22,9 +22,12 @@ def get_encouragement_on_path(filepath,state, tag) -> str:
 
     if state == "any":
         messages = data.get("any", [])
-    else:
+    elif state == "tiered":
         category_dict = data.get("tiered", {})
         messages = category_dict.get(tag, [])
+    else:
+        # Fallback to checking the tag as a top-level key for custom categories
+        messages = data.get(tag, [])
 
     if not messages:
         return "I can't find a encouragement; but keep going!"

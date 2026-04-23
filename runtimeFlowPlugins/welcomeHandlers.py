@@ -9,7 +9,7 @@ from .encouragementGenerator import encouragement_switch
 
 # Centralized main menu message for consistent UX across all return-to-menu flows.
 MAIN_MENU_WELCOME_MESSAGE = (
-    "Welcome to the main menu! You can ask for encouragement, take a quiz, or chat with me!"
+    "Here is the main menu! You can ask for encouragement, take a quiz, or chat with me!"
     "\nIf you want to change your password, just type 'change password'."
     "\nWhat would you like to do?"
     "\nOr if you want to end our conversation, just type 'exit'."
@@ -28,6 +28,22 @@ def get_return_to_menu_message() -> str:
     """Return the transition message shown before returning to main menu."""
     return RETURN_TO_MENU_MESSAGE
 
+
+def calculate_average_score(quiz_progress) -> float | None:
+    """Calculate the overall average percentage score from quiz progress metadata."""
+    if not quiz_progress or not isinstance(quiz_progress, dict):
+        return None
+    total_score = 0
+    total_questions = 0
+    for entry in quiz_progress.values():
+        if isinstance(entry, dict):
+            total_score += entry.get("score", 0)
+            total_questions += entry.get("total", 0)
+    
+    if total_questions == 0:
+        return None
+    return (total_score / total_questions) * 100
+
 @runtimeFlowPlugins.register("WelcomeHandler")
 def welcome_handler(state, meta, inputText, predictedIntent):
     """Route menu-level intents and return standardized flow outcomes."""
@@ -43,7 +59,28 @@ def welcome_handler(state, meta, inputText, predictedIntent):
     # chat -> call and hand off to chat flow, and then come back to main menu after user says they want to exit the chat
     # capture any handoffs and do not handoff from here unless it is from a success state after this intent has handled once 
     if state == "passoff":
-        nextResponse = MAIN_MENU_WELCOME_MESSAGE
+        username = meta.get("username", "Student")
+        quiz_progress = meta.get("quiz_progress")
+        avg_score = calculate_average_score(quiz_progress)
+
+        if avg_score is not None and avg_score < 40:
+            encouragement = encouragement_switch("custom", tag="struggling_encouragements")
+            greeting = (
+                f"Welcome back, {username}. I noticed your average quiz score is a bit low. {encouragement} "
+                "No worries, we can improve together!"
+            )
+        elif not quiz_progress:
+            encouragement = encouragement_switch("custom", tag="generic_encouragements")
+            greeting = (
+                f"Welcome, {username}! It looks like you're new here. {encouragement} "
+            )
+        else:
+            encouragement = encouragement_switch("custom", tag="generic_encouragements")
+            greeting = (
+                f"Welcome back, {username}! You're doing great. {encouragement} "
+            )
+
+        nextResponse = greeting + "\n\n" + MAIN_MENU_WELCOME_MESSAGE
         nextState = "success"
         return {"response": nextResponse, "next_handler": nextHandler, "next_state": nextState, "meta_update": nextMeta}
     
