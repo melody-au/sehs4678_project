@@ -1,0 +1,5 @@
+username: test123
+role: student
+salt: 5b71265677e088db786d419dd7cdd3bd
+hashed_password: 5b14830a9118fe3f52d0eb2881c5e85b9a2562655393b4c9b30a8467e0d7c118
+quiz_progress: {}
